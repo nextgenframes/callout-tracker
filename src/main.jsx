@@ -1829,7 +1829,7 @@ function CalloutCenter({ state, actions }) {
     return compareText(a[secondaryKey], b[secondaryKey]) || compareDate(b.date, a.date);
   });
   function exportFiltered() {
-    downloadCsv(`callouts-${today}.csv`, ["Date", "Time", "Name", "Company", "Shift", "Reason", "Hours Before Shift", "Coverage Status", "Replacement", "Status"], sortedCallouts.map((c) => [c.date, c.submittedTime, c.name, c.company, normalizeShift(c.shift), c.reason, c.hoursBeforeShiftStart, c.coverageStatus, c.replacementAssigned, c.status]));
+    downloadCsv(`callouts-${today}.csv`, ["Date", "Time", "Name", "Company", "Shift", "Reason", "Notes", "Hours Before Shift", "Coverage Status", "Replacement", "Status"], sortedCallouts.map((c) => [c.date, c.submittedTime, c.name, c.company, normalizeShift(c.shift), c.reason, c.notes || "", c.hoursBeforeShiftStart, c.coverageStatus, c.replacementAssigned, c.status]));
   }
   async function removeCallout(id) {
     if (!(await confirmDelete("this callout"))) return;
@@ -1908,8 +1908,8 @@ function CalloutTable({ callouts, sortBy, setSortBy, onRemove }) {
   return (
     <div className="table-wrap">
       <table>
-        <thead><tr><th><button className="sort-button" type="button" onClick={() => setSortBy("date")}>Date{sortBy === "date" ? " ↑" : ""}</button></th><th>Time</th><th><button className="sort-button" type="button" onClick={() => setSortBy("name")}>Name{sortBy === "name" ? " ↑" : ""}</button></th><th><button className="sort-button" type="button" onClick={() => setSortBy("company")}>Company{sortBy === "company" ? " ↑" : ""}</button></th><th>Shift</th><th>Reason</th><th>Hours Before</th><th>Coverage</th><th>Replacement</th><th>Status</th><th>Actions</th></tr></thead>
-        <tbody>{callouts.length ? callouts.map((c) => <tr key={c.id}><td>{c.date}</td><td>{c.submittedTime}</td><td>{c.name}</td><td>{c.company}</td><td>{normalizeShift(c.shift)}</td><td>{c.reason}</td><td>{c.hoursBeforeShiftStart}</td><td>{c.coverageStatus}</td><td>{c.replacementAssigned || "Unassigned"}</td><td><span className="status called-out">{c.status}</span></td><td><div className="row-actions"><button className="danger" onClick={() => onRemove(c.id)}>Remove</button></div></td></tr>) : <tr><td colSpan="11">No callouts match filters.</td></tr>}</tbody>
+        <thead><tr><th><button className="sort-button" type="button" onClick={() => setSortBy("date")}>Date{sortBy === "date" ? " ↑" : ""}</button></th><th>Time</th><th><button className="sort-button" type="button" onClick={() => setSortBy("name")}>Name{sortBy === "name" ? " ↑" : ""}</button></th><th><button className="sort-button" type="button" onClick={() => setSortBy("company")}>Company{sortBy === "company" ? " ↑" : ""}</button></th><th>Shift</th><th>Reason</th><th>Notes</th><th>Hours Before</th><th>Coverage</th><th>Replacement</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>{callouts.length ? callouts.map((c) => <tr key={c.id}><td>{c.date}</td><td>{c.submittedTime}</td><td>{c.name}</td><td>{c.company}</td><td>{normalizeShift(c.shift)}</td><td>{c.reason}</td><td className="notes-cell" title={c.notes || ""}>{c.notes || "-"}</td><td>{c.hoursBeforeShiftStart}</td><td>{c.coverageStatus}</td><td>{c.replacementAssigned || "Unassigned"}</td><td><span className="status called-out">{c.status}</span></td><td><div className="row-actions"><button className="danger" onClick={() => onRemove(c.id)}>Remove</button></div></td></tr>) : <tr><td colSpan="12">No callouts match filters.</td></tr>}</tbody>
       </table>
     </div>
   );
