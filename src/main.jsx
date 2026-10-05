@@ -1249,7 +1249,7 @@ function AdminCommandCenter({ state, actions, dbStatus, session, localDisplayNam
           {page === "Daily Ops" && <DailyOperations state={operationsState} actions={operationsActions} metrics={operationsMetrics} currentDate={currentDate} />}
           {page === "Weekly Attendance" && <WeeklyAttendanceTracker state={operationsState} actions={operationsActions} opsShift={selectedOpsShift} />}
       {page === "Calendar" && <WeeklyCalendarView state={operationsState} actions={operationsActions} currentDate={currentDate} />}
-          {page === "Callouts" && <CalloutCenter state={operationsState} actions={operationsActions} />}
+          {page === "Callouts" && <CalloutCenter state={{ ...shiftState, contractors: operationsState.contractors }} actions={shiftActions} />}
           {page === "Vehicles" && <VehicleModule vehicles={operationsState.vehicles} contractors={operationsState.contractors} saveVehicles={operationsActions.saveVehicles} />}
           {page === "Performance" && <PerformanceScorecard contractors={operationsState.contractors} callouts={operationsState.callouts} attendanceRecords={operationsState.attendanceRecords} />}
           {page === "Reports" && <ReportsGenerator state={operationsState} actions={operationsActions} />}
@@ -1760,10 +1760,15 @@ function CalloutCenter({ state, actions }) {
     if (!(await confirmDelete("this callout"))) return;
     actions.saveCallouts(state.callouts.filter((callout) => callout.id !== id));
   }
+  function addCallout(callout) {
+    actions.submitCallout(callout);
+    setFilters({ date: "", company: "", shift: "", reason: "" });
+    setSortBy("date");
+  }
   return (
     <section className="panel">
       <div className="section-heading"><div><p className="eyebrow">Callout Management</p><h2>Callout Center</h2></div><button className="primary-button" onClick={exportFiltered}>Export CSV</button></div>
-      <ManualCalloutEntry contractors={state.contractors} opsShift={actions.opsShift} onSubmit={actions.submitCallout} />
+      <ManualCalloutEntry contractors={state.contractors} opsShift={actions.opsShift} onSubmit={addCallout} />
       <div className="filters-grid">
         <label>Date<input type="date" value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })} /></label>
         <label>Company<select value={filters.company} onChange={(e) => setFilters({ ...filters, company: e.target.value })}><option value="">All</option>{companies.map((c) => <option key={c}>{c}</option>)}</select></label>
