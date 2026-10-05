@@ -676,6 +676,10 @@ function App() {
   const [passwordResetMode, setPasswordResetMode] = useState(isRecoveryLink);
 
   useEffect(() => {
+    localStorage.removeItem("coverageTickets");
+  }, []);
+
+  useEffect(() => {
     if (!hasSupabaseConfig) return;
     async function loadSession() {
       const { data } = await supabase.auth.getSession();
