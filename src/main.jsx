@@ -35,7 +35,6 @@ const attendanceActions = ["Scheduled", "Late", "No Show", "Leaving Early", "Day
 const dailyResetStatuses = ["Present", "Called Out", "Late", "Leaving Early", "Day Off Requested", "No Show"];
 const attendanceStatuses = ["P", "A", "T", "WO"];
 const reportTypes = ["Daily attendance", "Weekly attendance", "Monthly attendance", "Vehicle utilization", "Operator utilization", "Callout trends", "Late trends"];
-const coverageStatuses = ["Pending", "Coverage Needed", "Covered", "Closed"];
 const reasons = ["Sick", "Emergency", "Transport", "Family", "Other"];
 const shiftStart = { "AM Shift": 6, "PM Shift": 14, "Overnight Shift": 22 };
 const vehicleModels = ["R1S", "R1T", "R2"];
@@ -288,9 +287,7 @@ function dbToCallout(row) {
     reason: row.reason ?? "",
     notes: row.notes ?? "",
     hoursBeforeShiftStart: row.hours_before_shift ?? 0,
-    coverageStatus: row.coverage_status ?? "Coverage Needed",
-    replacementAssigned: row.replacement_assigned ?? "",
-    status: row.status ?? "Pending"
+    status: row.status ?? "Called Out"
   };
 }
 
@@ -306,45 +303,7 @@ function calloutToDb(callout) {
     reason: callout.reason,
     notes: callout.notes,
     hours_before_shift: callout.hoursBeforeShiftStart ?? 0,
-    coverage_status: callout.coverageStatus ?? "Coverage Needed",
-    replacement_assigned: callout.replacementAssigned ?? "",
-    status: callout.status ?? "Pending"
-  };
-}
-
-function dbToTicket(row) {
-  return {
-    id: row.id,
-    site: row.site ?? defaultSite,
-    calloutId: row.callout_id ?? "",
-    contractorId: row.contractor_id ?? "",
-    date: row.date ?? today,
-    shift: normalizeShift(row.shift),
-    contractorName: row.contractor_name ?? "",
-    company: row.company ?? "",
-    reason: row.reason ?? "",
-    status: row.ticket_status ?? row.status ?? "Coverage Needed",
-    replacementAssigned: row.replacement_assigned ?? "",
-    notes: row.notes ?? "",
-    openedAt: row.opened_at ?? "",
-    coveredAt: row.covered_at ?? "",
-    responseTimeMinutes: row.response_minutes ?? ""
-  };
-}
-
-function ticketToDb(ticket) {
-  return {
-    id: ticket.id,
-    site: ticket.site ?? defaultSite,
-    callout_id: ticket.calloutId || null,
-    contractor_id: ticket.contractorId || null,
-    shift: normalizeShift(ticket.shift),
-    ticket_status: ticket.status ?? "Coverage Needed",
-    replacement_contractor_id: null,
-    notes: ticket.notes ?? "",
-    opened_at: ticket.openedAt || new Date().toISOString(),
-    covered_at: ticket.status === "Covered" ? new Date().toISOString() : null,
-    response_minutes: Number(ticket.responseTimeMinutes) || null
+    status: callout.status ?? "Called Out"
   };
 }
 
@@ -657,7 +616,7 @@ function tableHtml(title, headers, rows) {
 }
 
 function downloadSpreadsheet(data) {
-  const { contractors, callouts, tickets, laptops, vehicles, notes, attendanceRecords = [], stats } = data;
+  const { contractors, callouts, laptops, vehicles, notes, attendanceRecords = [], stats } = data;
   const workbook = `
     <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
       <head><meta charset="UTF-8" /><style>
@@ -674,8 +633,7 @@ function downloadSpreadsheet(data) {
           const attendanceStats = attendanceStatsForContractor(c, callouts, attendanceRecords);
           return [c.name, c.company, c.startDate, shiftLabel(c.shift), c.status, `${attendanceStats.attendance}%`, attendanceStats.absences, attendanceStats.tardy, `${c.trainingCompletion ?? 100}%`];
         }))}
-        ${tableHtml("Callout Log", ["Date", "Time", "Name", "Company", "Shift", "Reason", "Hours Before Shift", "Coverage Status", "Replacement", "Status"], callouts.map((c) => [c.date, c.submittedTime, c.name, c.company, shiftLabel(c.shift), c.reason, c.hoursBeforeShiftStart, c.coverageStatus, c.replacementAssigned, c.status]))}
-        ${tableHtml("Coverage Tickets", ["Date", "Shift", "Contractor", "Status", "Replacement", "Response Time", "Notes"], tickets.map((t) => [t.date, shiftLabel(t.shift), t.contractorName, t.status, t.replacementAssigned, t.responseTimeMinutes ? `${t.responseTimeMinutes} min` : "", t.notes]))}
+        ${tableHtml("Callout Log", ["Date", "Time", "Name", "Company", "Shift", "Reason", "Notes", "Hours Before Shift", "Status"], callouts.map((c) => [c.date, c.submittedTime, c.name, c.company, shiftLabel(c.shift), c.reason, c.notes || "", c.hoursBeforeShiftStart, c.status]))}
         ${tableHtml("Laptop Accountability", ["Asset", "Contractor", "Status", "Assigned By", "Assigned Date", "Returned By", "Returned Date", "Due Date"], laptops.map((l) => [l.asset, l.contractor, l.status, l.assignedBy, l.assignedDate, l.returnedBy, l.returnedDate, l.dueDate]))}
         ${tableHtml("Vehicles", ["Name", "VIN", "Status", "License Plate", "Model", "Year", "Location", "Assigned Contractor"], vehicles.map((v) => [v.name, v.vin, v.status, v.licensePlate, v.model, v.year, v.location, v.assignedContractorName]))}
         ${tableHtml("Weekly Attendance", ["Week Start", "Name", "Company", "Shift", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "P%", "A%", "Tardy %", "Comments"], attendanceRecords.map((r) => [r.weekStart, r.contractorName, r.company, shiftLabel(r.shift), r.monday, r.tuesday, r.wednesday, r.thursday, r.friday, `${weeklyAttendancePercent(r, "P")}%`, `${weeklyAttendancePercent(r, "A")}%`, `${weeklyAttendancePercent(r, "T")}%`, r.comments]))}
@@ -705,7 +663,6 @@ function App() {
   const [role, setRole] = useState(calloutOnly ? "operator" : "admin");
   const [contractors, setContractors] = useState(() => readSaved("contractors", starterContractors).map((c) => resetDailyStatusForDate({ ...c, site: siteFor(c), startDate: c.startDate ?? today, shift: normalizeShift(c.shift), status: c.status ?? "Scheduled", statusDate: c.statusDate ?? statusDateFor(c.id), attendance: c.attendance ?? 95, noShows: c.noShows ?? 0, lateArrivals: c.lateArrivals ?? 0, attendanceDays: c.attendanceDays ?? 0, trainingCompletion: c.trainingCompletion ?? 100 })));
   const [callouts, setCallouts] = useState(() => readSaved("callouts", []).map((item) => ({ ...item, site: siteFor(item) })));
-  const [tickets, setTickets] = useState(() => readSaved("coverageTickets", []).map((item) => ({ ...item, site: siteFor(item) })));
   const [laptops, setLaptops] = useState(() => readSaved("laptops", starterLaptops).map((item) => ({ ...item, site: siteFor(item) })));
   const [vehicles, setVehicles] = useState(() => readSaved("vehicles", starterVehicles).map((item) => ({ ...item, site: siteFor(item) })));
   const [attendanceRecords, setAttendanceRecords] = useState(() => readSaved("attendanceRecords", []).map((item) => ({ ...item, site: siteFor(item), shift: normalizeShift(item.shift) })));
@@ -751,7 +708,6 @@ function App() {
     }
     loadTable("contractors", "contractors", setContractors, dbToContractor, "name");
     loadTable("callouts", "callouts", setCallouts, dbToCallout, "submitted_at");
-    loadTable("coverage_tickets", "coverageTickets", setTickets, dbToTicket, "opened_at");
     loadTable("laptops", "laptops", setLaptops, dbToLaptop, "assigned_date");
     loadTable("vehicles", "vehicles", setVehicles, dbToVehicle, "name");
     loadTable("attendance_records", "attendanceRecords", setAttendanceRecords, dbToAttendance, "week_start");
@@ -797,10 +753,6 @@ function App() {
     syncRows("callouts", "callouts", callouts, next, setCallouts, calloutToDb, "callouts");
   }
 
-  function saveTickets(next) {
-    syncRows("coverage_tickets", "coverageTickets", tickets, next, setTickets, ticketToDb, "coverage tickets");
-  }
-
   function saveLaptops(next) {
     syncRows("laptops", "laptops", laptops, next, setLaptops, laptopToDb, "laptops");
   }
@@ -842,34 +794,15 @@ function App() {
       company: contractor?.company ?? "",
       shift,
       hoursBeforeShiftStart: hoursBefore,
-      coverageStatus: "Coverage Needed",
-      replacementAssigned: "",
-      status: "Coverage Needed",
+      status: "Called Out",
       ...callout
     };
-    const ticket = {
-      id: crypto.randomUUID(),
-      site,
-      calloutId: enriched.id,
-      contractorId: contractor?.id ?? "",
-      date: callout.date,
-      shift,
-      contractorName: callout.name,
-      company: contractor?.company ?? "",
-      reason: callout.reason,
-      status: "Coverage Needed",
-      replacementAssigned: "",
-      notes: "",
-      openedAt: submitted.toISOString(),
-      responseTimeMinutes: ""
-    };
     saveCallouts([enriched, ...callouts]);
-    saveTickets([ticket, ...tickets]);
-    pushNotification(`Callout submitted: ${callout.name} / ${site} / ${shift}. Coverage ticket created.`, site);
+    pushNotification(`Callout submitted: ${callout.name} / ${site} / ${shift}.`, site);
   }
 
-  const state = { contractors, callouts, tickets, laptops, vehicles, attendanceRecords, notes, notifications };
-  const actions = { saveContractors, saveCallouts, saveTickets, saveLaptops, saveVehicles, saveAttendanceRecords, saveNotes, saveNotifications, pushNotification, submitCallout };
+  const state = { contractors, callouts, laptops, vehicles, attendanceRecords, notes, notifications };
+  const actions = { saveContractors, saveCallouts, saveLaptops, saveVehicles, saveAttendanceRecords, saveNotes, saveNotifications, pushNotification, submitCallout };
   const adminAllowed = !hasSupabaseConfig || Boolean(adminSession);
 
   async function signOutAdmin() {
@@ -1210,7 +1143,6 @@ function AdminCommandCenter({ state, actions, dbStatus, session, localDisplayNam
       ...siteState,
       contractors: shiftContractors,
       callouts: siteState.callouts.filter((callout) => normalizeShift(callout.shift) === selectedOpsShift || shiftContractorNames.has(callout.name?.toLowerCase())),
-      tickets: siteState.tickets.filter((ticket) => normalizeShift(ticket.shift) === selectedOpsShift || shiftContractorNames.has(ticket.contractorName?.toLowerCase())),
       attendanceRecords: siteState.attendanceRecords.filter((record) => normalizeShift(record.shift) === selectedOpsShift),
       laptops: siteState.laptops.filter((laptop) => !laptop.contractorId || shiftContractorIds.has(laptop.contractorId)),
       notifications: siteState.notifications.filter((notification) => !notification.message || notification.message.includes(selectedOpsShift) || !shifts.some((shift) => notification.message.includes(shift))),
@@ -1226,7 +1158,6 @@ function AdminCommandCenter({ state, actions, dbStatus, session, localDisplayNam
       ...actions,
       saveContractors: scopedSave("contractors", actions.saveContractors),
       saveCallouts: scopedSave("callouts", actions.saveCallouts),
-      saveTickets: scopedSave("tickets", actions.saveTickets),
       saveLaptops: scopedSave("laptops", actions.saveLaptops),
       saveVehicles: scopedSave("vehicles", actions.saveVehicles),
       saveAttendanceRecords: scopedSave("attendanceRecords", actions.saveAttendanceRecords),
@@ -1247,7 +1178,6 @@ function AdminCommandCenter({ state, actions, dbStatus, session, localDisplayNam
       ...siteActions,
       saveContractors: scopedSave("contractors", siteActions.saveContractors, (item) => normalizeShift(item.shift) === selectedOpsShift),
       saveCallouts: scopedSave("callouts", siteActions.saveCallouts, (item) => normalizeShift(item.shift) === selectedOpsShift || inShiftByName(item.name)),
-      saveTickets: scopedSave("tickets", siteActions.saveTickets, (item) => normalizeShift(item.shift) === selectedOpsShift || inShiftByName(item.contractorName)),
       saveAttendanceRecords: scopedSave("attendanceRecords", siteActions.saveAttendanceRecords, (item) => normalizeShift(item.shift) === selectedOpsShift),
       saveLaptops: scopedSave("laptops", siteActions.saveLaptops, (item) => !item.contractorId || inShiftById(item.contractorId)),
       saveNotes: scopedSave("notes", siteActions.saveNotes, (item) => !item.text || item.text.includes(selectedOpsShift) || !shifts.some((shift) => item.text.includes(shift))),
@@ -1272,7 +1202,6 @@ function AdminCommandCenter({ state, actions, dbStatus, session, localDisplayNam
       ...shiftState,
       contractors: operationsContractors,
       callouts: shiftState.callouts.filter((callout) => operationNames.has(callout.name?.toLowerCase())),
-      tickets: shiftState.tickets.filter((ticket) => operationNames.has(ticket.contractorName?.toLowerCase())),
       attendanceRecords: shiftState.attendanceRecords.filter((record) => operationIds.has(record.contractorId) || operationNames.has(record.contractorName?.toLowerCase())),
       vehicles: shiftState.vehicles.filter((vehicle) => (!vehicle.assignedContractorId && !vehicle.assignedContractorName) || operationIds.has(vehicle.assignedContractorId) || operationNames.has(vehicle.assignedContractorName?.toLowerCase()))
     };
@@ -1286,7 +1215,6 @@ function AdminCommandCenter({ state, actions, dbStatus, session, localDisplayNam
       ...shiftActions,
       saveContractors: (next) => shiftActions.saveContractors([...hiddenContractors, ...next]),
       saveCallouts: (next) => shiftActions.saveCallouts([...shiftState.callouts.filter((callout) => !operationNames.has(callout.name?.toLowerCase())), ...next]),
-      saveTickets: (next) => shiftActions.saveTickets([...shiftState.tickets.filter((ticket) => !operationNames.has(ticket.contractorName?.toLowerCase())), ...next]),
       saveAttendanceRecords: (next) => shiftActions.saveAttendanceRecords([...shiftState.attendanceRecords.filter((record) => !operationIds.has(record.contractorId) && !operationNames.has(record.contractorName?.toLowerCase())), ...next]),
       saveVehicles: (next) => shiftActions.saveVehicles([...shiftState.vehicles.filter((vehicle) => (vehicle.assignedContractorId && !operationIds.has(vehicle.assignedContractorId)) || (vehicle.assignedContractorName && !operationNames.has(vehicle.assignedContractorName.toLowerCase()))), ...next])
     };
@@ -1333,12 +1261,10 @@ function AdminCommandCenter({ state, actions, dbStatus, session, localDisplayNam
   );
 }
 
-function buildMetrics({ contractors, callouts, tickets, laptops, attendanceRecords = [] }, currentDate = today, currentDay = todayDay) {
+function buildMetrics({ contractors, callouts, laptops, attendanceRecords = [] }, currentDate = today, currentDay = todayDay) {
   const active = contractors.filter(isOperationsContractor);
   const scheduled = active.filter((c) => c.scheduledDays.includes(currentDay));
   const todayCallouts = callouts.filter((c) => dateOnly(c.date) === currentDate);
-  const openTickets = tickets.filter((t) => ["Pending", "Coverage Needed"].includes(t.status));
-  const coveredTickets = tickets.filter((t) => t.status === "Covered" || t.status === "Closed");
   const overdue = laptops.filter((l) => l.status === "Overdue").length;
   const returned = laptops.filter((l) => l.status === "Returned").length;
   const assigned = laptops.filter((l) => l.status === "Assigned" || l.status === "Overdue").length;
@@ -1346,9 +1272,8 @@ function buildMetrics({ contractors, callouts, tickets, laptops, attendanceRecor
   const coveragePct = scheduled.length ? Math.round((available / scheduled.length) * 100) : 100;
   const attendance = active.length ? Math.round(active.reduce((sum, c) => sum + attendancePercent(c, callouts, attendanceRecords), 0) / active.length) : 100;
   const laptopCompliance = assigned + returned ? Math.round((returned / (assigned + returned)) * 100) : 100;
-  const readiness = Math.max(0, Math.round((coveragePct * 0.45) + (attendance * 0.3) + (laptopCompliance * 0.2) - (openTickets.length * 2)));
-  const avgCoverage = coveredTickets.length ? Math.round(coveredTickets.reduce((sum, t) => sum + (Number(t.responseTimeMinutes) || 0), 0) / coveredTickets.length) : 0;
-  return { active, scheduled, todayCallouts, openTickets, coveredTickets, overdue, returned, assigned, available, coveragePct, attendance, laptopCompliance, readiness, avgCoverage };
+  const readiness = Math.max(0, Math.round((coveragePct * 0.5) + (attendance * 0.3) + (laptopCompliance * 0.2)));
+  return { active, scheduled, todayCallouts, overdue, returned, assigned, available, coveragePct, attendance, laptopCompliance, readiness };
 }
 
 function Metric({ label, value }) {
@@ -1358,17 +1283,15 @@ function Metric({ label, value }) {
 function DailyOperations({ state, actions, metrics, currentDate = today }) {
   const level = metrics.readiness >= 90 ? "Healthy" : metrics.readiness >= 75 ? "Watch" : "Critical";
   const [showReadinessBreakdown, setShowReadinessBreakdown] = useState(false);
-  const coverageScore = Math.round(metrics.coveragePct * 0.45);
+  const coverageScore = Math.round(metrics.coveragePct * 0.5);
   const attendanceScore = Math.round(metrics.attendance * 0.3);
   const laptopScore = Math.round(metrics.laptopCompliance * 0.2);
-  const coveragePenalty = metrics.openTickets.length * 2;
   return (
     <>
       <section className="metric-grid">
         <Metric label="Total Scheduled" value={metrics.scheduled.length} />
         <Metric label="Total Available" value={metrics.available} />
         <Metric label="Total Callouts" value={metrics.todayCallouts.length} />
-        <Metric label="Open Coverage Gaps" value={metrics.openTickets.length} />
         <Metric label="Contractors In Training" value={state.contractors.filter((c) => isOperationsContractor(c) && c.status === "Training").length} />
         <Metric label="Laptop Issues" value={metrics.overdue} />
       </section>
@@ -1380,12 +1303,11 @@ function DailyOperations({ state, actions, metrics, currentDate = today }) {
         <section className="panel readiness-breakdown">
           <div className="section-heading"><div><p className="eyebrow">Calculation</p><h2>How readiness is calculated</h2></div></div>
           <div className="readiness-formula">
-            <article><span>Coverage</span><strong>{metrics.coveragePct}% x 45% = {coverageScore}</strong><p>{metrics.available} available / {metrics.scheduled.length} scheduled</p></article>
+            <article><span>Staffing Availability</span><strong>{metrics.coveragePct}% x 50% = {coverageScore}</strong><p>{metrics.available} available / {metrics.scheduled.length} scheduled</p></article>
             <article><span>Attendance</span><strong>{metrics.attendance}% x 30% = {attendanceScore}</strong><p>Average attendance across {metrics.active.length} active contractors</p></article>
             <article><span>Laptop Compliance</span><strong>{metrics.laptopCompliance}% x 20% = {laptopScore}</strong><p>{metrics.returned} returned / {metrics.assigned + metrics.returned} tracked laptop records</p></article>
-            <article><span>Coverage Gap Penalty</span><strong>-{coveragePenalty}</strong><p>{metrics.openTickets.length} open ticket(s) x 2 points</p></article>
           </div>
-          <p className="readiness-equation">Readiness = {coverageScore} + {attendanceScore} + {laptopScore} - {coveragePenalty} = {metrics.readiness}%</p>
+          <p className="readiness-equation">Readiness = {coverageScore} + {attendanceScore} + {laptopScore} = {metrics.readiness}%</p>
         </section>
       )}
       <section className="daily-command-grid">
@@ -1791,7 +1713,6 @@ function GlobalSearch({ state }) {
       ...state.vehicles.map((item) => ({ type: "Vehicle", title: item.name, detail: `${item.vin} / ${item.licensePlate} / ${item.assignedContractorName || "Unpaired"}` })),
       ...state.laptops.map((item) => ({ type: "Laptop", title: item.asset, detail: `${item.contractor || "Unassigned"} / ${item.status}` })),
       ...state.callouts.map((item) => ({ type: "Callout", title: item.name, detail: `${item.date} / ${item.reason} / ${item.status}` })),
-      ...state.tickets.map((item) => ({ type: "Coverage", title: item.contractorName, detail: `${item.date} / ${item.status} / ${item.replacementAssigned || "Unassigned"}` })),
       ...state.notes.map((item) => ({ type: "Note", title: item.date, detail: item.text })),
       ...state.attendanceRecords.map((item) => ({ type: "Attendance", title: item.contractorName, detail: `${item.weekStart} / ${item.company} / P:${weeklyAttendancePercent(item, "P")}% A:${weeklyAttendancePercent(item, "A")}% Tardy:${weeklyAttendancePercent(item, "T")}%` })),
       ...reportTypes.map((item) => ({ type: "Report", title: item, detail: "Available in Reports Generator" }))
@@ -1829,7 +1750,7 @@ function CalloutCenter({ state, actions }) {
     return compareText(a[secondaryKey], b[secondaryKey]) || compareDate(b.date, a.date);
   });
   function exportFiltered() {
-    downloadCsv(`callouts-${today}.csv`, ["Date", "Time", "Name", "Company", "Shift", "Reason", "Notes", "Hours Before Shift", "Coverage Status", "Replacement", "Status"], sortedCallouts.map((c) => [c.date, c.submittedTime, c.name, c.company, normalizeShift(c.shift), c.reason, c.notes || "", c.hoursBeforeShiftStart, c.coverageStatus, c.replacementAssigned, c.status]));
+    downloadCsv(`callouts-${today}.csv`, ["Date", "Time", "Name", "Company", "Shift", "Reason", "Notes", "Hours Before Shift", "Status"], sortedCallouts.map((c) => [c.date, c.submittedTime, c.name, c.company, normalizeShift(c.shift), c.reason, c.notes || "", c.hoursBeforeShiftStart, c.status]));
   }
   async function removeCallout(id) {
     if (!(await confirmDelete("this callout"))) return;
@@ -1894,7 +1815,7 @@ function ManualCalloutEntry({ contractors, opsShift = "AM Shift", onSubmit }) {
         <label className="wide">Notes<textarea value={form.notes} onChange={(event) => update("notes", event.target.value)} placeholder="Optional manager note" /></label>
       </div>
       <div className="manual-callout-footer">
-        <span>{selectedContractor ? `${selectedContractor.company || "No company"} / ${normalizeShift(selectedContractor.shift)}` : "Coverage ticket will be created automatically."}</span>
+        <span>{selectedContractor ? `${selectedContractor.company || "No company"} / ${normalizeShift(selectedContractor.shift)}` : "Callout will be logged only."}</span>
         <div className="row-actions">
           {saved && <span className="success-pill">Callout added</span>}
           <button className="primary-button" type="submit">Add Callout</button>
@@ -1908,46 +1829,10 @@ function CalloutTable({ callouts, sortBy, setSortBy, onRemove }) {
   return (
     <div className="table-wrap">
       <table>
-        <thead><tr><th><button className="sort-button" type="button" onClick={() => setSortBy("date")}>Date{sortBy === "date" ? " ↑" : ""}</button></th><th>Time</th><th><button className="sort-button" type="button" onClick={() => setSortBy("name")}>Name{sortBy === "name" ? " ↑" : ""}</button></th><th><button className="sort-button" type="button" onClick={() => setSortBy("company")}>Company{sortBy === "company" ? " ↑" : ""}</button></th><th>Shift</th><th>Reason</th><th>Notes</th><th>Hours Before</th><th>Coverage</th><th>Replacement</th><th>Status</th><th>Actions</th></tr></thead>
-        <tbody>{callouts.length ? callouts.map((c) => <tr key={c.id}><td>{c.date}</td><td>{c.submittedTime}</td><td>{c.name}</td><td>{c.company}</td><td>{normalizeShift(c.shift)}</td><td>{c.reason}</td><td className="notes-cell" title={c.notes || ""}>{c.notes || "-"}</td><td>{c.hoursBeforeShiftStart}</td><td>{c.coverageStatus}</td><td>{c.replacementAssigned || "Unassigned"}</td><td><span className="status called-out">{c.status}</span></td><td><div className="row-actions"><button className="danger" onClick={() => onRemove(c.id)}>Remove</button></div></td></tr>) : <tr><td colSpan="12">No callouts match filters.</td></tr>}</tbody>
+        <thead><tr><th><button className="sort-button" type="button" onClick={() => setSortBy("date")}>Date{sortBy === "date" ? " ↑" : ""}</button></th><th>Time</th><th><button className="sort-button" type="button" onClick={() => setSortBy("name")}>Name{sortBy === "name" ? " ↑" : ""}</button></th><th><button className="sort-button" type="button" onClick={() => setSortBy("company")}>Company{sortBy === "company" ? " ↑" : ""}</button></th><th>Shift</th><th>Reason</th><th>Notes</th><th>Hours Before</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>{callouts.length ? callouts.map((c) => <tr key={c.id}><td>{c.date}</td><td>{c.submittedTime}</td><td>{c.name}</td><td>{c.company}</td><td>{normalizeShift(c.shift)}</td><td>{c.reason}</td><td className="notes-cell" title={c.notes || ""}>{c.notes || "-"}</td><td>{c.hoursBeforeShiftStart}</td><td><span className="status called-out">{c.status}</span></td><td><div className="row-actions"><button className="danger" onClick={() => onRemove(c.id)}>Remove</button></div></td></tr>) : <tr><td colSpan="10">No callouts match filters.</td></tr>}</tbody>
       </table>
     </div>
-  );
-}
-
-function CoverageWorkflow({ state, actions, metrics }) {
-  function updateTicket(id, patch) {
-    const next = state.tickets.map((t) => {
-      if (t.id !== id) return t;
-      const responseTimeMinutes = patch.status === "Covered" && !t.responseTimeMinutes ? Math.max(1, Math.round((Date.now() - new Date(t.openedAt).getTime()) / 60000)) : t.responseTimeMinutes;
-      return { ...t, ...patch, responseTimeMinutes };
-    });
-    actions.saveTickets(next);
-    if (patch.status === "Covered") actions.pushNotification("Coverage assigned and shift marked covered.");
-  }
-  return (
-    <>
-      <section className="metric-grid">
-        <Metric label="Open Coverage Requests" value={metrics.openTickets.length} />
-        <Metric label="Covered Shifts" value={metrics.coveredTickets.length} />
-        <Metric label="Uncovered Shifts" value={metrics.openTickets.length} />
-        <Metric label="Avg Coverage Time" value={`${metrics.avgCoverage}m`} />
-      </section>
-      <section className="panel">
-        <div className="section-heading"><div><p className="eyebrow">Workflow</p><h2>Coverage Needed Tickets</h2></div></div>
-        <div className="ticket-grid">
-          {state.tickets.length ? state.tickets.map((ticket) => (
-            <article className="ticket-card" key={ticket.id}>
-              <div><strong>{ticket.contractorName}</strong><span>{ticket.date} / {normalizeShift(ticket.shift)} / {ticket.reason}</span></div>
-              <label>Replacement<select value={ticket.replacementAssigned} onChange={(e) => updateTicket(ticket.id, { replacementAssigned: e.target.value })}><option value="">Unassigned</option>{state.contractors.filter((c) => c.active && c.name !== ticket.contractorName).map((c) => <option key={c.id}>{c.name}</option>)}</select></label>
-              <label>Status<select value={ticket.status} onChange={(e) => updateTicket(ticket.id, { status: e.target.value })}>{coverageStatuses.map((s) => <option key={s}>{s}</option>)}</select></label>
-              <label>Notes<textarea value={ticket.notes} onChange={(e) => updateTicket(ticket.id, { notes: e.target.value })} /></label>
-              <span className="date-pill">Response: {ticket.responseTimeMinutes ? `${ticket.responseTimeMinutes} min` : "Open"}</span>
-            </article>
-          )) : <p>No coverage tickets yet.</p>}
-        </div>
-      </section>
-    </>
   );
 }
 
@@ -2369,7 +2254,7 @@ function WorkforceAnalytics({ state }) {
     <section className="analytics-grid">
       <BarPanel title="Callouts by Day" data={byDay} />
       <BarPanel title="Callouts by Company" data={byCompany} />
-      <BarPanel title="Shift Coverage Trends" data={byShift} />
+      <BarPanel title="Shift Staffing Trends" data={byShift} />
       <BarPanel title="No-Show / Reason Trends" data={byReason} />
     </section>
   );
@@ -2514,11 +2399,10 @@ function ReportsGenerator({ state, actions }) {
     try {
       const backup = JSON.parse(await file.text());
       const data = backup.data ?? backup;
-      const keys = ["contractors", "callouts", "tickets", "laptops", "vehicles", "attendanceRecords", "notes", "notifications"];
+      const keys = ["contractors", "callouts", "laptops", "vehicles", "attendanceRecords", "notes", "notifications"];
       if (!keys.every((key) => Array.isArray(data[key]))) throw new Error("Missing FleetOps data tables.");
       actions.saveContractors(data.contractors);
       actions.saveCallouts(data.callouts);
-      actions.saveTickets(data.tickets);
       actions.saveLaptops(data.laptops);
       actions.saveVehicles(data.vehicles);
       actions.saveAttendanceRecords(data.attendanceRecords);
@@ -2622,7 +2506,7 @@ function AiAssistant({ state, metrics }) {
         <div>
           <p className="eyebrow">AI Workforce Assistant</p>
           <h2>Operations Intelligence</h2>
-          <span>Uses live staffing, attendance, callout, coverage, and vehicle pairing data from this dashboard.</span>
+          <span>Uses live staffing, attendance, callout, and vehicle pairing data from this dashboard.</span>
         </div>
         <strong>{metrics.readiness}% Ready</strong>
       </section>
@@ -2672,11 +2556,11 @@ function generateAiInsights(state, metrics) {
   const overtimeWatch = state.contractors.filter((contractor) => (Number(contractor.attendanceDays) || 0) >= 5 || (Number(contractor.lateArrivals) || 0) >= 3);
   return [
     { type: "Pairing", title: "Optimal Pairing Pool", value: Math.min(available.length, openVehicles.length), detail: `${available.length} available operators and ${openVehicles.length} unpaired vehicles.` },
-    { type: "Staffing", title: "Shortage Risk", value: metrics.openTickets.length || Math.max(0, metrics.scheduled.length - metrics.available), detail: metrics.available < metrics.scheduled.length ? "Coverage is below scheduled demand." : "No immediate shortage detected." },
+    { type: "Staffing", title: "Shortage Risk", value: Math.max(0, metrics.scheduled.length - metrics.available), detail: metrics.available < metrics.scheduled.length ? "Available staffing is below scheduled demand." : "No immediate shortage detected." },
     { type: "Attendance", title: "Callout Risk", value: risk.length, detail: risk.slice(0, 3).map((item) => item.contractor.name).join(", ") || "No high-risk operators flagged." },
     { type: "Utilization", title: "Overtime Watch", value: overtimeWatch.length, detail: overtimeWatch.slice(0, 3).map((contractor) => contractor.name).join(", ") || "No overtime risk indicators." },
     { type: "Vehicles", title: "Rotation Candidates", value: pairedVehicles.length, detail: pairedVehicles.slice(0, 3).map((vehicle) => vehicle.name).join(", ") || "No paired vehicles yet." },
-    { type: "Summary", title: "End-of-Shift Ready", value: `${metrics.readiness}%`, detail: `${metrics.scheduled.length} scheduled, ${metrics.todayCallouts.length} callouts, ${metrics.openTickets.length} open gaps.` }
+    { type: "Summary", title: "End-of-Shift Ready", value: `${metrics.readiness}%`, detail: `${metrics.scheduled.length} scheduled, ${metrics.todayCallouts.length} callouts, ${Math.max(0, metrics.scheduled.length - metrics.available)} staffing gap.` }
   ];
 }
 
@@ -2685,12 +2569,12 @@ function generateAiAnswer(prompt, state, metrics) {
   const available = availableOperators(state);
   const openVehicles = state.vehicles.filter((vehicle) => !vehicle.assignedContractorId && !vehicle.assignedContractorName);
   if (lower.includes("pair")) return openVehicles.slice(0, 5).map((vehicle, index) => `${vehicle.name}: ${available[index]?.name || "No available operator"}${available[index] ? ` (${available[index].company})` : ""}`).join("; ") || "No unpaired vehicles or available operators found.";
-  if (lower.includes("shortage")) return metrics.available < metrics.scheduled.length ? `Shortage risk: ${metrics.scheduled.length - metrics.available} operator gap. Open coverage tickets: ${metrics.openTickets.length}.` : `No shortage predicted. ${metrics.available} available for ${metrics.scheduled.length} scheduled.`;
+  if (lower.includes("shortage")) return metrics.available < metrics.scheduled.length ? `Shortage risk: ${metrics.scheduled.length - metrics.available} operator gap.` : `No shortage predicted. ${metrics.available} available for ${metrics.scheduled.length} scheduled.`;
   if (lower.includes("risk") || lower.includes("forecast")) return highRiskOperators(state).slice(0, 5).map((item) => `${item.contractor.name}: ${item.attendance}% attendance, ${item.callouts} callouts, ${item.tardy} tardy, ${item.absences} absent`).join("; ") || "No attendance or callout risk flags found.";
   if (lower.includes("overtime")) return state.contractors.filter((c) => (Number(c.attendanceDays) || 0) >= 5 || (Number(c.lateArrivals) || 0) >= 3).map((c) => `${c.name}: ${c.attendanceDays ?? 0} consecutive attendance days`).join("; ") || "No operators approaching overtime indicators.";
   if (lower.includes("rotation")) return state.vehicles.filter((v) => v.assignedContractorName).map((v) => `${v.name}: currently paired to ${v.assignedContractorName}; consider rotating if utilization is high.`).join("; ") || "No vehicle pairings available for rotation suggestions.";
-  if (lower.includes("end-of-shift") || lower.includes("summary")) return `End-of-shift summary: ${metrics.scheduled.length} scheduled, ${metrics.available} available, ${metrics.todayCallouts.length} callouts, ${metrics.openTickets.length} open gaps, readiness ${metrics.readiness}%.`;
-  if (lower.includes("staffing recommendations")) return `Staffing recommendation: keep ${Math.max(0, metrics.scheduled.length - metrics.available)} backup operators identified, close ${metrics.openTickets.length} coverage tickets, and prioritize ${available.slice(0, 3).map((c) => c.name).join(", ") || "available operators"} for coverage.`;
+  if (lower.includes("end-of-shift") || lower.includes("summary")) return `End-of-shift summary: ${metrics.scheduled.length} scheduled, ${metrics.available} available, ${metrics.todayCallouts.length} callouts, readiness ${metrics.readiness}%.`;
+  if (lower.includes("staffing recommendations")) return `Staffing recommendation: keep ${Math.max(0, metrics.scheduled.length - metrics.available)} backup operators identified and prioritize ${available.slice(0, 3).map((c) => c.name).join(", ") || "available operators"} for staffing support.`;
   if (lower.includes("vehicle")) {
     const vehicleQuery = state.vehicles.find((vehicle) => lower.includes(vehicle.name.toLowerCase()) || lower.includes((vehicle.licensePlate || "").toLowerCase()));
     if (vehicleQuery) return `${vehicleQuery.name} can be covered by ${available.slice(0, 5).map((c) => `${c.name} (${c.company})`).join(", ") || "no currently available operators"}. Current pairing: ${vehicleQuery.assignedContractorName || "Unpaired"}.`;
@@ -2701,18 +2585,17 @@ function generateAiAnswer(prompt, state, metrics) {
     const contractorCompanyByName = Object.fromEntries(state.contractors.map((contractor) => [contractor.name, contractor.company]));
     return Object.entries(groupCompanyCallouts(state.callouts, contractorCompanyByName)).sort((a, b) => b[1] - a[1]).map(([company, count]) => `${company}: ${count}`).join(", ") || "No callouts by company yet.";
   }
-  if (lower.includes("95")) return `${Math.max(0, Math.ceil((metrics.scheduled.length * 0.95) - metrics.available))} additional contractors needed to maintain 95% coverage.`;
-  return `Today: ${metrics.scheduled.length} scheduled, ${metrics.available} available, ${metrics.todayCallouts.length} callouts, ${metrics.openTickets.length} open coverage gaps, readiness ${metrics.readiness}%.`;
+  if (lower.includes("95")) return `${Math.max(0, Math.ceil((metrics.scheduled.length * 0.95) - metrics.available))} additional contractors needed to maintain 95% staffing availability.`;
+  return `Today: ${metrics.scheduled.length} scheduled, ${metrics.available} available, ${metrics.todayCallouts.length} callouts, readiness ${metrics.readiness}%.`;
 }
 
 function ExecutiveDashboard({ state, metrics }) {
   const stats = {
     "Total Contractors": state.contractors.length,
     "Active Contractors": metrics.active.length,
-    "Staffing Coverage %": `${metrics.coveragePct}%`,
+    "Staffing Availability %": `${metrics.coveragePct}%`,
     "Callout Rate %": `${metrics.scheduled.length ? Math.round((metrics.todayCallouts.length / metrics.scheduled.length) * 100) : 0}%`,
     "Attendance %": `${metrics.attendance}%`,
-    "Open Coverage Tickets": metrics.openTickets.length,
     "Laptop Compliance %": `${metrics.laptopCompliance}%`,
     "Operational Readiness Score": `${metrics.readiness}%`
   };
